@@ -26,7 +26,7 @@
       let lastSpokenTime = {}; 
 
       function startNavigation() {
-        speak("系統啟動，移動超過30公尺將自動更新地標");
+        speak("系統啟動，移動超過50公尺將自動更新地標");
         navigator.geolocation.watchPosition(updatePosition, (err) => {
             console.error(err);
         }, { enableHighAccuracy: true, timeout: 10000 });
@@ -39,11 +39,11 @@
 
         document.getElementById('status').innerText = `定位成功: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 
-        // --- 核心省錢邏輯：移動不足 30m 不重新抓 API ---
+        // --- 核心省錢邏輯：移動不足 50m 不重新抓 API ---
         if (lastQueryPos) {
             const traveled = google.maps.geometry.spherical.computeDistanceBetween(myPos, lastQueryPos);
-            if (traveled < 30) {
-                console.log(`目前移動 ${Math.round(traveled)}m，未達 30m 門檻，節省 API 次數中`);
+            if (traveled < 50) {
+                console.log(`目前移動 ${Math.round(traveled)}m，未達 50m 門檻，節省 API 次數中`);
                 return; 
             }
         }
