@@ -10,7 +10,7 @@
         #status { color: blue; font-weight: bold; padding: 10px; background: white; border-radius: 5px; border: 1px solid #ddd; }
         #log { margin-top: 20px; background: #fff; padding: 15px; border-radius: 8px; height: 400px; overflow-y: scroll; border: 1px solid #ccc; }
         button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
-        .place-item { border-bottom: 1px solid #eee; padding: 8px 0; }
+        .place-item { border-bottom: 1px solid #eee; padding: 10px 0; }
     </style>
 </head>
 <body>
@@ -25,86 +25,75 @@
         let lastSpokenTime = {}; 
 
         function startNavigation() {
-            // 語音初始化測試
             speak("導航系統已啟動");
-
             if (!navigator.geolocation) {
                 updateStatus("瀏覽器不支援 GPS", "red");
                 return;
             }
-            
             updateStatus("正在獲取 GPS 訊號...", "orange");
-
-            // 監控位置
             navigator.geolocation.watchPosition(updatePosition, (err) => {
                 updateStatus("GPS 錯誤: " + err.message, "red");
             }, { enableHighAccuracy: true, timeout: 10000 });
         }
 
-async function updatePosition(position) {
-    const lat = position.coords.latitude;
-    const lng = position.coords.longitude;
-    const myPos = new google.maps.LatLng(lat, lng);
+        async function updatePosition(position) {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const myPos = new google.maps.LatLng(lat, lng);
 
-    document.getElementById('status').innerText = `定位成功: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+            updateStatus(`定位成功: ${lat.toFixed(5)}, ${lng.toFixed(5)}`, "green");
 
-    if (isSearching) return;
-    isSearching = true;
+            if (isSearching) return;
+            isSearching = true;
 
-    try {
-        if (!service) {
-            service = new google.maps.places.PlacesService(document.createElement('div'));
+            try {
+                if (!service) {
+                    service = new google.maps.places.PlacesService(document.createElement('div'));
+                }
+
+                // 擴大半徑到 1000 公尺，搜尋 7-11 測試
+                const request = {
+                    location: myPos,
+                    radius: 1000,
+                    query: '7-11' 
+                };
+
+                service.textSearch(request, (results, status) => {
+                    isSearching = false; 
+                    if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+                        renderResults(myPos, results);
+                    } else {
+                        updateStatus("搜尋失敗: " + status, "red");
+                    }
+                });
+            } catch (e) {
+                console.error("執行錯誤:", e);
+                isSearching = false;
+            }
         }
 
-        // 改用 textSearch，這對 API 權限的要求通常比較寬鬆
-        const request = {
-            location: myPos,
-            radius: 1000,
-            query: '餐廳' // 先用一個具體的關鍵字測試，確保一定有資料
-        };
-
-        service.textSearch(request, (results, status) => {
-            isSearching = false; 
-            const statusDisplay = document.getElementById('status');
-
-            if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-                statusDisplay.innerText = `成功抓到 ${results.length} 個地點！`;
-                const logBox = document.getElementById('log');
-                logBox.innerHTML = "<h3>即時偵測紀錄：</h3>";
-                
-                results.forEach(place => {
-                    processPlace(myPos, place);
-                });
-            } else {
-                // 如果失敗，這裡會顯示原因，如果是 REQUEST_DENIED 務必檢查帳單與權限
-                console.error("API 失敗狀態:", status);
-                statusDisplay.innerText = "搜尋失敗: " + status;
-            }
-        });
-    } catch (e) {
-        console.error("執行錯誤:", e);
-        isSearching = false;
-    }
-}
         function renderResults(myPos, results) {
             const logBox = document.getElementById('log');
             logBox.innerHTML = `<h3>找到 ${results.length} 個地點：</h3>`;
 
             results.forEach(place => {
                 const shopPos = place.geometry.location;
+                // 計算距離
                 const dist = Math.round(google.maps.geometry.spherical.computeDistanceBetween(myPos, shopPos));
                 
-                // 顯示在地圖紀錄中
+                // 計算方位
+                const heading = google.maps.geometry.spherical.computeHeading(myPos, shopPos);
+                let dir = getDirectionText(heading);
+
+                // 顯示在畫面上
                 const div = document.createElement('div');
                 div.className = 'place-item';
-                div.innerHTML = `<strong>📍 ${place.name}</strong><br>距離：${dist} 公尺`;
+                div.innerHTML = `<strong>📍 ${place.name}</strong><br>方位：${dir} | 距離：${dist} 公尺`;
                 logBox.appendChild(div);
 
-                // 語音播報邏輯 (200公尺內且每分鐘只唸一次)
+                // 語音播報邏輯 (500公尺內測試，每分鐘只唸一次)
                 const now = Date.now();
-                if (dist < 200 && (!lastSpokenTime[place.name] || now - lastSpokenTime[place.name] > 60000)) {
-                    const heading = google.maps.geometry.spherical.computeHeading(myPos, shopPos);
-                    let dir = getDirectionText(heading);
+                if (dist < 500 && (!lastSpokenTime[place.name] || now - lastSpokenTime[place.name] > 60000)) {
                     speak(`${dir} ${dist} 公尺處有 ${place.name}`);
                     lastSpokenTime[place.name] = now;
                 }
@@ -112,6 +101,7 @@ async function updatePosition(position) {
         }
 
         function getDirectionText(heading) {
+            // 將角度轉為文字
             if (heading > -45 && heading <= 45) return "前方";
             if (heading > 45 && heading <= 135) return "右方";
             if (heading < -45 && heading >= -135) return "左方";
