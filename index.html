@@ -21,16 +21,20 @@
         let lastSpokenTime = {}; // 用來防止重複播報同一間店
 
         function startNavigation() {
+            // 1. 先解鎖語音
+            const unlockMsg = new SpeechSynthesisUtterance("系統啟動中");
+            unlockMsg.lang = 'zh-TW';
+            window.speechSynthesis.speak(unlockMsg);
+
             if (!navigator.geolocation) {
                 alert("你的瀏覽器不支援定位功能");
                 return;
             }
             document.getElementById('status').innerText = "定位中...";
-            
-            // 持續追蹤位置
+
             navigator.geolocation.watchPosition(updatePosition, handleError, {
                 enableHighAccuracy: true,
-                timeout: 5000,
+                timeout: 10000, // 增加到 10 秒避免超時
                 maximumAge: 0
             });
         }
@@ -38,20 +42,25 @@
         function updatePosition(position) {
             const myPos = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
             document.getElementById('status').innerText = `目前經緯度: ${myPos.lat().toFixed(5)}, ${myPos.lng().toFixed(5)}`;
-            
-            // 使用 Google Places API 搜尋附近 50 公尺的地標
+
             const service = new google.maps.places.PlacesService(document.createElement('div'));
             const request = {
                 location: myPos,
-                radius: '50', // 搜尋半徑 (公尺)
-                type: ['store', 'school', 'restaurant', 'bus_station'] // 想要搜尋的地標類型
+                radius: 1000, // 搜尋 1 公里
+                // 移除 fields 參數，確保與舊版 nearbySearch 相容
+                type: ['store', 'restaurant', 'food', 'point_of_interest', 'establishment']
             };
 
             service.nearbySearch(request, (results, status) => {
                 if (status === google.maps.places.PlacesServiceStatus.OK) {
-                    results.forEach(place => {
-                        processPlace(myPos, place);
-                    });
+                    document.getElementById('status').innerText = "搜尋成功，找到 " + results.length + " 處地標";
+                    document.getElementById('status').style.color = "green";
+                    
+                    // 清除舊的紀錄（可選），或直接持續增加
+                    results.forEach(place => processPlace(myPos, place));
+                } else {
+                    document.getElementById('status').innerText = "搜尋失敗: " + status;
+                    document.getElementById('status').style.color = "red";
                 }
             });
         }
@@ -59,20 +68,25 @@
         function processPlace(myPos, place) {
             const shopPos = place.geometry.location;
             const shopName = place.name;
-            
-            // 1. 直觀計算距離 (公尺)
             const distance = Math.round(google.maps.geometry.spherical.computeDistanceBetween(myPos, shopPos));
             
-            // 2. 直觀計算方位角
+            // --- 測試重點：先不管距離，只要搜到就印在 log 區塊 ---
+            const testLog = document.createElement('p');
+            testLog.style.fontSize = "12px";
+            testLog.style.color = "#666";
+            testLog.innerText = `[偵測到] ${shopName} (距離 ${distance} 公尺)`;
+            document.getElementById('log').appendChild(testLog);
+
+            // 這裡才是原本的「語音播報門檻」
             const heading = google.maps.geometry.spherical.computeHeading(myPos, shopPos);
             let direction = "前方";
             if (heading > 45 && heading < 135) direction = "右方";
             else if (heading < -45 && heading > -135) direction = "左方";
             else if (heading >= 135 || heading <= -135) direction = "後方";
 
-            // 3. 播報邏輯：如果距離小於 30 公尺且一分鐘內沒報過這間店
             const currentTime = new Date().getTime();
-            if (distance < 30 && (!lastSpokenTime[shopName] || currentTime - lastSpokenTime[shopName] > 60000)) {
+            // 先把門檻調高一點，例如 200 公尺，方便你測試
+            if (distance < 200 && (!lastSpokenTime[shopName] || currentTime - lastSpokenTime[shopName] > 60000)) {
                 announce(direction, distance, shopName);
                 lastSpokenTime[shopName] = currentTime;
             }
