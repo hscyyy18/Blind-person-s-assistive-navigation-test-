@@ -41,43 +41,51 @@
             }, { enableHighAccuracy: true, timeout: 10000 });
         }
 
-        function updatePosition(position) {
-            const lat = position.coords.latitude;
-            const lng = position.coords.longitude;
-            const myPos = new google.maps.LatLng(lat, lng);
+async function updatePosition(position) {
+    const lat = position.coords.latitude;
+    const lng = position.coords.longitude;
+    const myPos = new google.maps.LatLng(lat, lng);
 
-            updateStatus(`定位成功: ${lat.toFixed(5)}, ${lng.toFixed(5)}`, "green");
+    document.getElementById('status').innerText = `定位成功: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 
-            if (isSearching) return;
-            isSearching = true;
+    if (isSearching) return;
+    isSearching = true;
 
-            try {
-                if (!service) {
-                    service = new google.maps.places.PlacesService(document.createElement('div'));
-                }
-
-                const request = {
-                    location: myPos,
-                    radius: 1000, // 搜尋 1 公里內
-                    type: ['establishment']
-                };
-
-                service.nearbySearch(request, (results, status) => {
-                    isSearching = false; 
-                    
-                    if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-                        renderResults(myPos, results);
-                    } else {
-                        // 如果這裡出現 REQUEST_DENIED，代表 API Key 權限或帳單問題
-                        updateStatus("API 搜尋狀態: " + status, status === "ZERO_RESULTS" ? "orange" : "red");
-                    }
-                });
-            } catch (e) {
-                console.error("執行異常:", e);
-                isSearching = false;
-            }
+    try {
+        if (!service) {
+            service = new google.maps.places.PlacesService(document.createElement('div'));
         }
 
+        // 改用 textSearch，這對 API 權限的要求通常比較寬鬆
+        const request = {
+            location: myPos,
+            radius: 1000,
+            query: '餐廳' // 先用一個具體的關鍵字測試，確保一定有資料
+        };
+
+        service.textSearch(request, (results, status) => {
+            isSearching = false; 
+            const statusDisplay = document.getElementById('status');
+
+            if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+                statusDisplay.innerText = `成功抓到 ${results.length} 個地點！`;
+                const logBox = document.getElementById('log');
+                logBox.innerHTML = "<h3>即時偵測紀錄：</h3>";
+                
+                results.forEach(place => {
+                    processPlace(myPos, place);
+                });
+            } else {
+                // 如果失敗，這裡會顯示原因，如果是 REQUEST_DENIED 務必檢查帳單與權限
+                console.error("API 失敗狀態:", status);
+                statusDisplay.innerText = "搜尋失敗: " + status;
+            }
+        });
+    } catch (e) {
+        console.error("執行錯誤:", e);
+        isSearching = false;
+    }
+}
         function renderResults(myPos, results) {
             const logBox = document.getElementById('log');
             logBox.innerHTML = `<h3>找到 ${results.length} 個地點：</h3>`;
