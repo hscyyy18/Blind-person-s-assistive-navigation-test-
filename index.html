@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>盲人導航助手測試版</title>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC-TIvRKEtaXQONKgVK86ZAvYEnsppGEzU&libraries=places,geometry"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
+        #status { color: blue; font-weight: bold; }
+        #log { margin-top: 20px; background: #f0f0f0; padding: 10px; border-radius: 5px; height: 300px; overflow-y: scroll; }
+    </style>
+</head>
+<body>
+    <h1>AI 導航助手 🤖</h1>
+    <p>狀態：<span id="status">準備中...</span></p>
+    <button onclick="startNavigation()">開始即時導航</button>
+    <div id="log"><h3>即時偵測紀錄：</h3></div>
+
+    <script>
+        let lastSpokenTime = {}; // 用來防止重複播報同一間店
+
+        function startNavigation() {
+            if (!navigator.geolocation) {
+                alert("你的瀏覽器不支援定位功能");
+                return;
+            }
+            document.getElementById('status').innerText = "定位中...";
+            
+            // 持續追蹤位置
+            navigator.geolocation.watchPosition(updatePosition, handleError, {
+                enableHighAccuracy: true,
+                timeout: 5000,
+                maximumAge: 0
+            });
+        }
+
+        function updatePosition(position) {
+            const myPos = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
+            document.getElementById('status').innerText = `目前經緯度: ${myPos.lat().toFixed(5)}, ${myPos.lng().toFixed(5)}`;
+            
+            // 使用 Google Places API 搜尋附近 50 公尺的地標
+            const service = new google.maps.places.PlacesService(document.createElement('div'));
+            const request = {
+                location: myPos,
+                radius: '50', // 搜尋半徑 (公尺)
+                type: ['store', 'school', 'restaurant', 'bus_station'] // 想要搜尋的地標類型
+            };
+
+            service.nearbySearch(request, (results, status) => {
+                if (status === google.maps.places.PlacesServiceStatus.OK) {
+                    results.forEach(place => {
+                        processPlace(myPos, place);
+                    });
+                }
+            });
+        }
+
+        function processPlace(myPos, place) {
+            const shopPos = place.geometry.location;
+            const shopName = place.name;
+            
+            // 1. 直觀計算距離 (公尺)
+            const distance = Math.round(google.maps.geometry.spherical.computeDistanceBetween(myPos, shopPos));
+            
+            // 2. 直觀計算方位角
+            const heading = google.maps.geometry.spherical.computeHeading(myPos, shopPos);
+            let direction = "前方";
+            if (heading > 45 && heading < 135) direction = "右方";
+            else if (heading < -45 && heading > -135) direction = "左方";
+            else if (heading >= 135 || heading <= -135) direction = "後方";
+
+            // 3. 播報邏輯：如果距離小於 30 公尺且一分鐘內沒報過這間店
+            const currentTime = new Date().getTime();
+            if (distance < 30 && (!lastSpokenTime[shopName] || currentTime - lastSpokenTime[shopName] > 60000)) {
+                announce(direction, distance, shopName);
+                lastSpokenTime[shopName] = currentTime;
+            }
+        }
+
+        function announce(dir, dist, name) {
+            const text = `${dir} ${dist} 公尺處有 ${name}`;
+            const logEntry = document.createElement('p');
+            logEntry.innerText = `[${new Date().toLocaleTimeString()}] ${text}`;
+            document.getElementById('log').appendChild(logEntry);
+
+            const msg = new SpeechSynthesisUtterance(text);
+            msg.lang = 'zh-TW';
+            window.speechSynthesis.speak(msg);
+        }
+
+        function handleError(err) {
+            console.warn(`ERROR(${err.code}): ${err.message}`);
+        }
+    </script>
+</body>
+</html>
