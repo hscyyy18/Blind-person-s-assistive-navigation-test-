@@ -13,87 +13,95 @@
         .place-item { border-bottom: 1px solid #eee; padding: 10px 0; }
     </style>
 </head>
-<body>
+  <body>
     <h1>AI 導航助手 🤖</h1>
     <p>狀態：<span id="status">準備中...</span></p>
     <button onclick="startNavigation()">開始即時導航</button>
     <div id="log"><h3>即時偵測紀錄：</h3></div>
 
     <script>
-    let service;
-    let isSearching = false; 
-    let lastSpokenTime = {}; 
+      let service;
+      let isSearching = false; 
+      let lastQueryPos = null; // 儲存上一次發送 API 的位置
+      let lastSpokenTime = {}; 
 
-    function startNavigation() {
-        speak("導航系統已啟動");
-        if (!navigator.geolocation) {
-            updateStatus("瀏覽器不支援 GPS", "red");
-            return;
-        }
-        updateStatus("正在獲取 GPS 訊號...", "orange");
+      function startNavigation() {
+        speak("系統啟動，移動超過30公尺將自動更新地標");
         navigator.geolocation.watchPosition(updatePosition, (err) => {
-            updateStatus("GPS 錯誤: " + err.message, "red");
+            console.error(err);
         }, { enableHighAccuracy: true, timeout: 10000 });
-    }
+      }
 
-    async function updatePosition(position) {
+      async function updatePosition(position) {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
         const myPos = new google.maps.LatLng(lat, lng);
 
-        updateStatus(`定位成功: ${lat.toFixed(5)}, ${lng.toFixed(5)}`, "green");
+        document.getElementById('status').innerText = `定位成功: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+
+        // --- 核心省錢邏輯：移動不足 30m 不重新抓 API ---
+        if (lastQueryPos) {
+            const traveled = google.maps.geometry.spherical.computeDistanceBetween(myPos, lastQueryPos);
+            if (traveled < 30) {
+                console.log(`目前移動 ${Math.round(traveled)}m，未達 30m 門檻，節省 API 次數中`);
+                return; 
+            }
+        }
 
         if (isSearching) return;
         isSearching = true;
 
         try {
-            if (!service) {
-                service = new google.maps.places.PlacesService(document.createElement('div'));
-            }
+            if (!service) service = new google.maps.places.PlacesService(document.createElement('div'));
 
             const request = {
                 location: myPos,
-                radius: 1000,
-                query: '7-11' // 你也可以改成 '便利商店' 或 '餐廳'
+                radius: 500,
+                // query 改成 '地標' 或 '商店' 來抓取更多元的結果
+                query: '地標' 
             };
 
             service.textSearch(request, (results, status) => {
                 isSearching = false; 
                 if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-                    document.getElementById('status').innerText = `成功抓到 ${results.length} 個地點！`;
-                    // 呼叫下方的處理函式
-                    renderResults(myPos, results);
-                } else {
-                    updateStatus("搜尋失敗: " + status, "red");
+                    lastQueryPos = myPos; // 成功才更新基準點
+                    document.getElementById('status').innerText = "成功更新周邊地標！";
+                    renderAndSpeak(myPos, results);
                 }
             });
-        } catch (e) {
-            console.error("執行錯誤:", e);
-            isSearching = false;
-        }
+        } catch (e) { isSearching = false; }
     }
 
-    function renderResults(myPos, results) {
+    function renderAndSpeak(myPos, results) {
         const logBox = document.getElementById('log');
-        logBox.innerHTML = `<h3>即時偵測紀錄 (${results.length})：</h3>`;
+        logBox.innerHTML = `<h3>周邊偵測結果：</h3>`;
 
-        results.forEach(place => {
+        // 1. 計算所有地點的距離並排序
+        const sortedPlaces = results.map(place => {
             const shopPos = place.geometry.location;
-            const dist = Math.round(google.maps.geometry.spherical.computeDistanceBetween(myPos, shopPos));
-            const heading = google.maps.geometry.spherical.computeHeading(myPos, shopPos);
-            let dir = getDirectionText(heading);
+            return {
+                name: place.name,
+                dist: Math.round(google.maps.geometry.spherical.computeDistanceBetween(myPos, shopPos)),
+                heading: google.maps.geometry.spherical.computeHeading(myPos, shopPos)
+            };
+        }).sort((a, b) => a.dist - b.dist); // 由近到遠排序
 
-            // 1. 顯示在畫面
+        // 2. 顯示所有結果 (滿足你的測試需求)
+        sortedPlaces.forEach(p => {
             const div = document.createElement('div');
             div.className = 'place-item';
-            div.innerHTML = `<strong>📍 ${place.name}</strong><br>方位：${dir} | 距離：${dist} 公尺`;
+            div.innerHTML = `<strong>📍 ${p.name}</strong> (${getDirectionText(p.heading)}) - ${p.dist}m`;
             logBox.appendChild(div);
+        });
 
-            // 2. 語音播報 (500公尺內，每分鐘唸一次)
+        // 3. 語音播報：只唸出最近的 3 個，避免資訊過載
+        const top3 = sortedPlaces.slice(0, 3);
+        top3.forEach(p => {
             const now = Date.now();
-            if (dist < 500 && (!lastSpokenTime[place.name] || now - lastSpokenTime[place.name] > 60000)) {
-                speak(`${dir} ${dist} 公尺處有 ${place.name}`);
-                lastSpokenTime[place.name] = now;
+            // 200公尺內且兩分鐘內不重複唸同一間
+            if (p.dist < 200 && (!lastSpokenTime[p.name] || now - lastSpokenTime[p.name] > 120000)) {
+                speak(`${getDirectionText(p.heading)} ${p.dist} 公尺處有 ${p.name}`);
+                lastSpokenTime[p.name] = now;
             }
         });
     }
@@ -109,12 +117,6 @@
         const msg = new SpeechSynthesisUtterance(text);
         msg.lang = 'zh-TW';
         window.speechSynthesis.speak(msg);
-    }
-
-    function updateStatus(text, color) {
-        const s = document.getElementById('status');
-        s.innerText = text;
-        s.style.color = color;
     }
 </script>
 </body>
