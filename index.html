@@ -6,9 +6,11 @@
     <title>盲人導航助手測試版</title>
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC-TIvRKEtaXQONKgVK86ZAvYEnsppGEzU&libraries=places,geometry"></script>
     <style>
-        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
-        #status { color: blue; font-weight: bold; }
-        #log { margin-top: 20px; background: #f0f0f0; padding: 10px; border-radius: 5px; height: 300px; overflow-y: scroll; }
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; background-color: #f9f9f9; }
+        #status { color: blue; font-weight: bold; padding: 10px; background: white; border-radius: 5px; border: 1px solid #ddd; }
+        #log { margin-top: 20px; background: #fff; padding: 15px; border-radius: 8px; height: 400px; overflow-y: scroll; border: 1px solid #ccc; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+        .place-item { border-bottom: 1px solid #eee; padding: 8px 0; }
     </style>
 </head>
 <body>
@@ -18,36 +20,33 @@
     <div id="log"><h3>即時偵測紀錄：</h3></div>
 
     <script>
-        // 在 script 標籤內頂層定義變數，避免重複建立 service
         let service;
-        let isSearching = false; // 防止重疊請求
-        let lastSpokenTime = {}; // 用來防止重複播報同一間店
+        let isSearching = false; 
+        let lastSpokenTime = {}; 
 
         function startNavigation() {
-            // 1. 先解鎖語音
-            const unlockMsg = new SpeechSynthesisUtterance("系統啟動中");
-            unlockMsg.lang = 'zh-TW';
-            window.speechSynthesis.speak(unlockMsg);
+            // 語音初始化測試
+            speak("導航系統已啟動");
 
             if (!navigator.geolocation) {
-                alert("你的瀏覽器不支援定位功能");
+                updateStatus("瀏覽器不支援 GPS", "red");
                 return;
             }
-            document.getElementById('status').innerText = "定位中...";
+            
+            updateStatus("正在獲取 GPS 訊號...", "orange");
 
-            navigator.geolocation.watchPosition(updatePosition, handleError, {
-                enableHighAccuracy: true,
-                timeout: 10000, // 增加到 10 秒避免超時
-                maximumAge: 0
-            });
+            // 監控位置
+            navigator.geolocation.watchPosition(updatePosition, (err) => {
+                updateStatus("GPS 錯誤: " + err.message, "red");
+            }, { enableHighAccuracy: true, timeout: 10000 });
         }
 
-        async function updatePosition(position) {
+        function updatePosition(position) {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
-            const myPos = new google.maps.LatLng(lat, lng); // 轉成 Google 座標物件方便後面計算
+            const myPos = new google.maps.LatLng(lat, lng);
 
-            document.getElementById('status').innerText = `定位成功: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+            updateStatus(`定位成功: ${lat.toFixed(5)}, ${lng.toFixed(5)}`, "green");
 
             if (isSearching) return;
             isSearching = true;
@@ -59,78 +58,68 @@
 
                 const request = {
                     location: myPos,
-                    radius: 1000, 
+                    radius: 1000, // 搜尋 1 公里內
                     type: ['establishment']
                 };
 
                 service.nearbySearch(request, (results, status) => {
                     isSearching = false; 
-                    const statusDisplay = document.getElementById('status');
-
+                    
                     if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-                        statusDisplay.innerText = `找到 ${results.length} 個地標！`;
-                        statusDisplay.style.color = "green";
-
-                        // 重要：清空舊紀錄並執行處理函式
-                        const logBox = document.getElementById('log');
-                        logBox.innerHTML = "<h3>即時偵測紀錄：</h3>";
-
-                        results.forEach(place => {
-                            processPlace(myPos, place); // 呼叫你定義的處理函式
-                        });
+                        renderResults(myPos, results);
                     } else {
-                        // 如果 status 是 REQUEST_DENIED，就是 API 權限沒開
-                        console.error("API 失敗原因:", status);
-                        statusDisplay.innerText = "API 錯誤代碼: " + status;
-                        statusDisplay.style.color = "red";
+                        // 如果這裡出現 REQUEST_DENIED，代表 API Key 權限或帳單問題
+                        updateStatus("API 搜尋狀態: " + status, status === "ZERO_RESULTS" ? "orange" : "red");
                     }
                 });
             } catch (e) {
-                console.error("執行錯誤:", e);
+                console.error("執行異常:", e);
                 isSearching = false;
             }
         }
 
-        function processPlace(myPos, place) {
-            const shopPos = place.geometry.location;
-            const shopName = place.name;
-            const distance = Math.round(google.maps.geometry.spherical.computeDistanceBetween(myPos, shopPos));
-            
-            // --- 測試重點：先不管距離，只要搜到就印在 log 區塊 ---
-            const testLog = document.createElement('p');
-            testLog.style.fontSize = "12px";
-            testLog.style.color = "#666";
-            testLog.innerText = `[偵測到] ${shopName} (距離 ${distance} 公尺)`;
-            document.getElementById('log').appendChild(testLog);
+        function renderResults(myPos, results) {
+            const logBox = document.getElementById('log');
+            logBox.innerHTML = `<h3>找到 ${results.length} 個地點：</h3>`;
 
-            // 這裡才是原本的「語音播報門檻」
-            const heading = google.maps.geometry.spherical.computeHeading(myPos, shopPos);
-            let direction = "前方";
-            if (heading > 45 && heading < 135) direction = "右方";
-            else if (heading < -45 && heading > -135) direction = "左方";
-            else if (heading >= 135 || heading <= -135) direction = "後方";
+            results.forEach(place => {
+                const shopPos = place.geometry.location;
+                const dist = Math.round(google.maps.geometry.spherical.computeDistanceBetween(myPos, shopPos));
+                
+                // 顯示在地圖紀錄中
+                const div = document.createElement('div');
+                div.className = 'place-item';
+                div.innerHTML = `<strong>📍 ${place.name}</strong><br>距離：${dist} 公尺`;
+                logBox.appendChild(div);
 
-            const currentTime = new Date().getTime();
-            // 先把門檻調高一點，例如 200 公尺，方便你測試
-            if (distance < 200 && (!lastSpokenTime[shopName] || currentTime - lastSpokenTime[shopName] > 60000)) {
-                announce(direction, distance, shopName);
-                lastSpokenTime[shopName] = currentTime;
-            }
+                // 語音播報邏輯 (200公尺內且每分鐘只唸一次)
+                const now = Date.now();
+                if (dist < 200 && (!lastSpokenTime[place.name] || now - lastSpokenTime[place.name] > 60000)) {
+                    const heading = google.maps.geometry.spherical.computeHeading(myPos, shopPos);
+                    let dir = getDirectionText(heading);
+                    speak(`${dir} ${dist} 公尺處有 ${place.name}`);
+                    lastSpokenTime[place.name] = now;
+                }
+            });
         }
 
-        function announce(dir, dist, name) {
-            const text = `${dir} ${dist} 公尺處有 ${name}`;
-            const logEntry = document.createElement('p');
-            logEntry.innerText = `[${new Date().toLocaleTimeString()}] ${text}`;
-            document.getElementById('log').appendChild(logEntry);
+        function getDirectionText(heading) {
+            if (heading > -45 && heading <= 45) return "前方";
+            if (heading > 45 && heading <= 135) return "右方";
+            if (heading < -45 && heading >= -135) return "左方";
+            return "後方";
+        }
 
+        function speak(text) {
             const msg = new SpeechSynthesisUtterance(text);
             msg.lang = 'zh-TW';
             window.speechSynthesis.speak(msg);
         }
 
-        function handleError(err) {
-            console.warn(`ERROR(${err.code}): ${err.message}`);
+        function updateStatus(text, color) {
+            const s = document.getElementById('status');
+            s.innerText = text;
+            s.style.color = color;
         }
     </script>
 </body>
