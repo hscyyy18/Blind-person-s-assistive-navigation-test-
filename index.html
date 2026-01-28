@@ -20,105 +20,102 @@
     <div id="log"><h3>即時偵測紀錄：</h3></div>
 
     <script>
-        let service;
-        let isSearching = false; 
-        let lastSpokenTime = {}; 
+    let service;
+    let isSearching = false; 
+    let lastSpokenTime = {}; 
 
-        function startNavigation() {
-            speak("導航系統已啟動");
-            if (!navigator.geolocation) {
-                updateStatus("瀏覽器不支援 GPS", "red");
-                return;
-            }
-            updateStatus("正在獲取 GPS 訊號...", "orange");
-            navigator.geolocation.watchPosition(updatePosition, (err) => {
-                updateStatus("GPS 錯誤: " + err.message, "red");
-            }, { enableHighAccuracy: true, timeout: 10000 });
+    function startNavigation() {
+        speak("導航系統已啟動");
+        if (!navigator.geolocation) {
+            updateStatus("瀏覽器不支援 GPS", "red");
+            return;
         }
+        updateStatus("正在獲取 GPS 訊號...", "orange");
+        navigator.geolocation.watchPosition(updatePosition, (err) => {
+            updateStatus("GPS 錯誤: " + err.message, "red");
+        }, { enableHighAccuracy: true, timeout: 10000 });
+    }
 
-        async function updatePosition(position) {
-            const lat = position.coords.latitude;
-            const lng = position.coords.longitude;
-            const myPos = new google.maps.LatLng(lat, lng);
+    async function updatePosition(position) {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const myPos = new google.maps.LatLng(lat, lng);
 
-            updateStatus(`定位成功: ${lat.toFixed(5)}, ${lng.toFixed(5)}`, "green");
+        updateStatus(`定位成功: ${lat.toFixed(5)}, ${lng.toFixed(5)}`, "green");
 
-            if (isSearching) return;
-            isSearching = true;
+        if (isSearching) return;
+        isSearching = true;
 
-            try {
-                if (!service) {
-                    service = new google.maps.places.PlacesService(document.createElement('div'));
-                }
-
-                // 擴大半徑到 1000 公尺，搜尋 7-11 測試
-                const request = {
-                    location: myPos,
-                    radius: 1000,
-                    query: '7-11' 
-                };
-
-                service.textSearch(request, (results, status) => {
-                    isSearching = false; 
-                    if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-                        renderResults(myPos, results);
-                    } else {
-                        updateStatus("搜尋失敗: " + status, "red");
-                    }
-                });
-            } catch (e) {
-                console.error("執行錯誤:", e);
-                isSearching = false;
+        try {
+            if (!service) {
+                service = new google.maps.places.PlacesService(document.createElement('div'));
             }
-        }
 
-        function renderResults(myPos, results) {
-            const logBox = document.getElementById('log');
-            logBox.innerHTML = `<h3>找到 ${results.length} 個地點：</h3>`;
+            const request = {
+                location: myPos,
+                radius: 1000,
+                query: '7-11' // 你也可以改成 '便利商店' 或 '餐廳'
+            };
 
-            results.forEach(place => {
-                const shopPos = place.geometry.location;
-                // 計算距離
-                const dist = Math.round(google.maps.geometry.spherical.computeDistanceBetween(myPos, shopPos));
-                
-                // 計算方位
-                const heading = google.maps.geometry.spherical.computeHeading(myPos, shopPos);
-                let dir = getDirectionText(heading);
-
-                // 顯示在畫面上
-                const div = document.createElement('div');
-                div.className = 'place-item';
-                div.innerHTML = `<strong>📍 ${place.name}</strong><br>方位：${dir} | 距離：${dist} 公尺`;
-                logBox.appendChild(div);
-
-                // 語音播報邏輯 (500公尺內測試，每分鐘只唸一次)
-                const now = Date.now();
-                if (dist < 500 && (!lastSpokenTime[place.name] || now - lastSpokenTime[place.name] > 60000)) {
-                    speak(`${dir} ${dist} 公尺處有 ${place.name}`);
-                    lastSpokenTime[place.name] = now;
+            service.textSearch(request, (results, status) => {
+                isSearching = false; 
+                if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+                    document.getElementById('status').innerText = `成功抓到 ${results.length} 個地點！`;
+                    // 呼叫下方的處理函式
+                    renderResults(myPos, results);
+                } else {
+                    updateStatus("搜尋失敗: " + status, "red");
                 }
             });
+        } catch (e) {
+            console.error("執行錯誤:", e);
+            isSearching = false;
         }
+    }
 
-        function getDirectionText(heading) {
-            // 將角度轉為文字
-            if (heading > -45 && heading <= 45) return "前方";
-            if (heading > 45 && heading <= 135) return "右方";
-            if (heading < -45 && heading >= -135) return "左方";
-            return "後方";
-        }
+    function renderResults(myPos, results) {
+        const logBox = document.getElementById('log');
+        logBox.innerHTML = `<h3>即時偵測紀錄 (${results.length})：</h3>`;
 
-        function speak(text) {
-            const msg = new SpeechSynthesisUtterance(text);
-            msg.lang = 'zh-TW';
-            window.speechSynthesis.speak(msg);
-        }
+        results.forEach(place => {
+            const shopPos = place.geometry.location;
+            const dist = Math.round(google.maps.geometry.spherical.computeDistanceBetween(myPos, shopPos));
+            const heading = google.maps.geometry.spherical.computeHeading(myPos, shopPos);
+            let dir = getDirectionText(heading);
 
-        function updateStatus(text, color) {
-            const s = document.getElementById('status');
-            s.innerText = text;
-            s.style.color = color;
-        }
-    </script>
+            // 1. 顯示在畫面
+            const div = document.createElement('div');
+            div.className = 'place-item';
+            div.innerHTML = `<strong>📍 ${place.name}</strong><br>方位：${dir} | 距離：${dist} 公尺`;
+            logBox.appendChild(div);
+
+            // 2. 語音播報 (500公尺內，每分鐘唸一次)
+            const now = Date.now();
+            if (dist < 500 && (!lastSpokenTime[place.name] || now - lastSpokenTime[place.name] > 60000)) {
+                speak(`${dir} ${dist} 公尺處有 ${place.name}`);
+                lastSpokenTime[place.name] = now;
+            }
+        });
+    }
+
+    function getDirectionText(heading) {
+        if (heading > -45 && heading <= 45) return "前方";
+        if (heading > 45 && heading <= 135) return "右方";
+        if (heading < -45 && heading >= -135) return "左方";
+        return "後方";
+    }
+
+    function speak(text) {
+        const msg = new SpeechSynthesisUtterance(text);
+        msg.lang = 'zh-TW';
+        window.speechSynthesis.speak(msg);
+    }
+
+    function updateStatus(text, color) {
+        const s = document.getElementById('status');
+        s.innerText = text;
+        s.style.color = color;
+    }
+</script>
 </body>
 </html>
